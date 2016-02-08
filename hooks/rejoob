@@ -1,0 +1,96 @@
+#!/usr/bin/ash
+
+run_hook () {
+    if [ -z "$rootsubdir" ]; then
+        if [ -z "$loop" ]; then
+	    msg "enabling tmpfs boot"
+            mount_handler="tmpfs_mount_handler"
+        else
+            msg "root is an image at: $loop"
+            mount_handler="img_mount_handler"
+        fi
+    else
+        msg "root is a subdirectory at: $rootsubdir"
+        mount_handler="dir_mount_handler"
+    fi
+}
+
+img_mount_handler() {
+    mkdir /host
+    mount -t $rootfstype $root /host
+    mknod /dev/loop256 b 7 256
+    losetup /dev/loop256 /host/$loop
+    mount -t $loopfstype -o rw,noatime /dev/loop256 /new_root
+}
+
+dir_mount_handler() {
+    mkdir /host
+    mount -t $rootfstype $root /host
+    mount --bind /host/$rootsubdir /new_root
+}
+
+print_tmpfs_copy_warning() {
+    echo ' #    #     #     ####    #   #   ###   #   #    ###    #'
+    echo ' #    #    # #    #   #   ##  #    #    ##  #   #   #   #'
+    echo ' #    #   #   #   ####    # # #    #    # # #   #       #'
+    echo ' # ## #   #####   # #     # # #    #    # # #   #  ##   #'
+    echo ' ##  ##   #   #   #  #    #  ##    #    #  ##   #   #'
+    echo ' #    #   #   #   #   #   #   #   ###   #   #    ####   #'
+    echo ''
+    echo 'THIS INITSCRIPT DOES NOT INCLUDE ANY FACILITY TO SAVE CHANGES'
+    echo 'TO THE ACTUAL ROOT FILESYSTEM WHEN THE SYSTEM SHUTS DOWN.'
+    echo ''
+    echo 'ANY DATA THAT YOU VALUE MUST BE WRITTEN TO PERMANENT STORAGE'
+    echo 'IF YOU WISH TO EVER SEE IT AGAIN.'
+    echo ''
+    echo 'YOU HAVE BEEN WARNED!'
+    echo ''
+    echo 'ALSO NOTE THAT, IF YOU DO NOT HAVE A SEPERATE HOME AND ROOT'
+    echo 'FILESYSTEM, NOTHING UNDER THE TOP LEVEL HOME DIRECTORIES WILL'
+    echo 'BE COPIED TO TMPFS (TO SAVE TIME). THIS MEANS YOUR USER WILL'
+    echo 'APPEAR TO BE NEWLY CREATED AND YOU WILL NOT SEE ANYTHING IN YOUR'
+    echo 'HOME DIRECTORY. DO NOT BE ALARMED, NOTHING HAS BEEN DELETED.'
+}
+
+tmpfs_mount_handler() {
+    mkdir /src
+    echo 'mounting original root'
+    mount -o ro $root /src
+    echo 'mounting tmpfs root'
+    mount -t tmpfs -o 'size=90%' none /new_root
+
+    # cheap trick to exclude non-essential directories
+    for D in /src/root /src/home/* /src/var/cache /src/var/log /src/boot; do
+        mount -o ro -t tmpfs none $D
+    done
+
+    (cp -afr /src/* /new_root/; touch /new_root/.cp_finished) &
+    
+    # progress indicator
+    # jobs -p is acting up so we try a different tactic
+    # while [ ! -z "$(jobs -p)" ]; do
+    # while pgrep -f cp; do
+    while [ ! -e '/new_root/.cp_finished' ]; do
+        d=$(df -k /new_root | awk '/\// {print $3}')
+
+        clear
+        print_tmpfs_copy_warning
+        echo "copying ssd root to tmpfs: ${d} KiB"
+
+        sleep 1
+    done
+
+    echo 'tmpfs copy complete'
+
+    # just in case
+    wait
+
+    for D in /src/home/* /src/var/cache /src/var/log /src/boot /src; do
+        umount $D
+
+    done
+
+    rm /new_root/.cp_finished
+
+    echo 'ready to switch root now'
+}

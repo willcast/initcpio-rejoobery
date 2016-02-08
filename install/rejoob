@@ -1,0 +1,13 @@
+#!/bin/bash
+
+build ()
+{
+    add_runscript
+}
+
+help ()
+{
+cat<<HELPEOF
+    provides options to use loopback image or chroot directory as root, as well as copying normal rootfs to tmpfs, and then running from there
+HELPEOF
+}
